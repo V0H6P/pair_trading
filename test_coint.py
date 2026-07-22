@@ -43,7 +43,8 @@ class Coint_verif:
             raise CointError(f"La série  dprixA n'est pas stationnaire au niveau critique {crit_level}, donc elle n'est pas I(1)")
         if result_dy[0] >= result_dy[4]['5%'] :
             raise CointError(f"La série dprixB n'est pas stationnaire au niveau critique {crit_level}, donc elle n'est pas I(1)")
-        
+
+    @property    
     def spread_n_hedge_ratio(self):
         """Construction du spread et du hedge ratio par la méthode de Johasen
         x - beta y"""
@@ -58,6 +59,15 @@ class Coint_verif:
         self.Johansen_obj = result
         spread = np.column_stack((self.x, self.y))@v
         self.spread = spread
+        return spread, -v[1]
+    
+    @staticmethod
+    def spread_n_hedge_ratio_static(prixA, prixB):
+        data = pd.DataFrame({"x": pd.Series(prixA), "y": pd.Series(prixB)})
+        result = coint_johansen(data, det_order=0, k_ar_diff=1)
+        v = np.real(result.evec[:, 0])
+        v = v / v[0]
+        spread = np.column_stack((data["x"], data["y"])) @ v
         return spread, -v[1]
     
     def spread_stationnarity(self, crit_level:str = '5%'):
