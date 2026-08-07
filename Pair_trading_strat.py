@@ -49,7 +49,7 @@ class Strategie :
                 state = 0 #time_stop
 
         elif state == -1: # Short spread
-            if z_score < self.k_entry:
+            if z_score < self.k_exit: # TP !!!!
                 state = 0 # TP !!!
             elif z_score > self.stop_loss:
                 state = 0 #  SL :(((
@@ -118,3 +118,90 @@ class Strategie :
         
         return cumulative_pnl, stats
 
+    def simulate_capital(self, prixA, prixB, hedge:float, capital:float = 10000, f:float = 0.05):
+        """
+        Simulation PnL avec capital et risque à chaque trade.
+
+        Args :
+            prixA (arraylike) : Array contenant les prix de l'actif A
+            prixB (arraylike) : Array contenant les prix de l'actif B
+            hedge (float) : hedge ratio calculé sur les prix historiques des actifs A et B (par exemple a l'aide de Coint_verif.spread_n_hedge_ratio). La convention est : spread = A - beta*B
+            capital (float) : capital de départ
+            f (float) : risque à chaque trade en pourcentage du capital
+
+        Returns :
+            cumulative_capital (np.array) : array contenant le capital à chaque pas de temps
+        """
+        if len(prixA) != len(prixB) :
+            raise IndexError(f"Les deux séries de prix n'ont pas la même longueur : prixA : {len(prixA)} | prix B : {len(prixB)}")
+        prixA, prixB = np.asarray(prixA), np.asarray(prixB)
+        n = len(prixA)
+        cumulative_capital = np.zeros(n)
+        ops = [] # trace des opérations. (x, y) : x est l'opération, y est le jour d'entrée dans cette opération
+        entry_day = 0
+        patrimoine = capital
+        liquidité = capital # au cran 0, le patrimoine = liquidité car on a rien acheté encore
+        n_A, n_B = 0,0
+
+        # premier cran :
+
+        spread = prixA[0] - hedge*prixB[0]
+        op, entry_day = self.signal(spread, 0, 0, 0)
+        ops.append((op, entry_day))
+
+        if op == 1:
+            n_A = f*liquidité/prixA[t]
+            n_B = hedge*f*liquidité / prixB[t]
+
+            liquidité = liquidité - f*liquidité + n_B * prixB[t]
+            patrimoine = liquidité + n_A * prixA[t] - n_B * prixB[t] # on s'est endetté pour acheter B
+
+        elif op == -1:
+            n_A = f*liquidité/prixA[t]
+            n_B = hedge*f*liquidité / prixB[t]
+
+            liquidité = liquidité - hedge*f*liquidité + n_A * prixA[t]
+            patrimoine = liquidité + n_B*prixB[t] - n_A*prixA[t]
+
+        cumulative_capital[0] = patrimoine
+
+        for t in range(1, n): #Séquentiellement, on construit le spread, récupére le signal
+            spread = prixA[t] - hedge*prixB[t]
+            op, entry_day = self.signal(spread, t, ops[t-1][0], entry_day)
+            ops.append((op, entry_day))
+
+            if op == 1 : # on achète le spread (long A, short B)
+                if ops[t-1][0] != 1: # t est le jour de passage de l'ordre
+                    # on achète f*liquidité d'actif A et on vend a découvert hedge*f*liquidité de l'actif B
+                    n_A = f*liquidité/prixA[t]
+                    n_B = hedge*f*liquidité / prixB[t]
+
+                    liquidité = liquidité - f*liquidité + n_B * prixB[t]
+                    patrimoine = liquidité + n_A * prixA[t] - n_B * prixB[t] # on s'est endetté pour acheter B
+                else : # on est dans un achat de spread mais ce n'est pas le jour de la transaction
+                    # maj patrimoine, liquidité elle ne bouge pas (on n'achète ni ne vend rien)
+                    patrimoine = liquidité + n_A*prixA[t] - n_B*prixB[t] # tant que la position est ouverte, il faut racheter l'actif au prix courant. En fait, on emprunte une action, donc a la fin il faut rendre une action.
+
+            if op == -1 : # on vend le spread
+                if ops[t-1][0] != -1:
+                    n_A = f*liquidité/prixA[t]
+                    n_B = hedge*f*liquidité / prixB[t]
+
+                    liquidité = liquidité - hedge*f*liquidité + n_A * prixA[t]
+                    patrimoine = liquidité + n_B*prixB[t] - n_A*prixA[t]
+
+                else : 
+                    patrimoine = liquidité + n_B*prixB[t] - n_A*prixA[t]
+
+            if op == 0:
+                if ops[t-1][0] == 1 : # fin d'un achat de spread, on revends A et on rachète B
+                    liquidité = liquidité + n_A*prixA[t] - n_B*prixB[t]
+                    patrimoine = liquidité #position fermée
+
+                if ops[t-1][0] == -1 : # fin d'une vente de spread, on revends B et on rachète A
+                    liquidité = liquidité - n_A*prixA[t] + n_B*prixB[t]
+                    patrimoine = liquidité #position fermée
+                
+
+            cumulative_capital[t] = patrimoine
+        return cumulative_capital
