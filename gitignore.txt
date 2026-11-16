@@ -1,4 +1,0 @@
-Claude outputs/
-Minifiche.pdf
-answer.md
-question.md
